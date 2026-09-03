@@ -12,6 +12,21 @@ function formatDuration(milliseconds) { const seconds = Math.max(0, Math.floor(m
 function readSession() { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
 function saveState() { const saved = readSession(); localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, sessionId: state.sessionId, total: state.total, index: state.index, answers: state.answers, startedAt: state.startedAt, devtoolsOpenedAt: state.devtoolsOpenedAt, devtoolsTriggered: state.devtoolsTriggered })); }
 
+/**
+ * Función auxiliar para gestionar la interfaz de carga en un botón.
+ */
+function setButtonLoading(button, isLoading, loadingText = 'Cargando...') {
+  if (!button) return;
+  if (isLoading) {
+    button.dataset.originalText = button.textContent;
+    button.textContent = loadingText;
+    button.disabled = true;
+  } else {
+    button.textContent = button.dataset.originalText || button.textContent;
+    button.disabled = false;
+  }
+}
+
 async function request(url, options) {
   const response = await fetch(url, options);
   if (!response.ok) throw new Error(`Error de conexión: ${response.status}`);
@@ -21,9 +36,15 @@ async function request(url, options) {
 }
 
 async function startExam(nombre, correo) {
-  const data = await request(`${ENDPOINT_URL}?action=start&nombre=${encodeURIComponent(nombre)}&correo=${encodeURIComponent(correo)}`, { cache: 'no-store' });
-  state.sessionId = data.sessionId; state.total = data.total; state.question = data.question; state.index = data.index; state.answers = []; state.startedAt = Date.now(); state.remainingSeconds = data.remainingSeconds;
-  saveState(); showScreen('exam'); renderQuestion();
+  const submitBtn = $('#registration-form button[type="submit"]');
+  setButtonLoading(submitBtn, true, 'Iniciando...');
+  try {
+    const data = await request(`${ENDPOINT_URL}?action=start&nombre=${encodeURIComponent(nombre)}&correo=${encodeURIComponent(correo)}`, { cache: 'no-store' });
+    state.sessionId = data.sessionId; state.total = data.total; state.question = data.question; state.index = data.index; state.answers = []; state.startedAt = Date.now(); state.remainingSeconds = data.remainingSeconds;
+    saveState(); showScreen('exam'); renderQuestion();
+  } finally {
+    setButtonLoading(submitBtn, false);
+  }
 }
 
 async function restoreSession() {
@@ -40,7 +61,11 @@ function renderQuestion() {
   $('#question-title').textContent = question.pregunta;
   $('#code-container').innerHTML = question.tieneCodigo ? `<pre><code>${escapeHtml(question.codigo)}</code></pre>` : '';
   $('#options').innerHTML = question.opciones.map((option, index) => `<label class="option"><input type="radio" name="respuesta" value="${index}"><span>${escapeHtml(option)}</span></label>`).join('');
-  $('#answer-form button[type="submit"]').textContent = state.index === state.total - 1 ? 'Finalizar' : 'Siguiente';
+  
+  const submitBtn = $('#answer-form button[type="submit"]');
+  submitBtn.textContent = state.index === state.total - 1 ? 'Finalizar' : 'Siguiente';
+  submitBtn.disabled = false;
+  
   startTimer(state.remainingSeconds ?? question.tiempoSegundos);
 }
 
@@ -50,12 +75,22 @@ function updateTimer() { $('#timer').textContent = `${Math.max(0, state.secondsL
 async function submitAnswer(selectedIndex) {
   if (state.finalizing || !state.question) return;
   state.finalizing = true; clearInterval(state.timerId);
+  
+  const submitBtn = $('#answer-form button[type="submit"]');
+  const isLastQuestion = state.index === state.total - 1;
+  setButtonLoading(submitBtn, true, isLastQuestion ? 'Enviando...' : 'Cargando...');
+
   try {
     const data = await request(ENDPOINT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'answer', sessionId: state.sessionId, questionId: state.question.id, seleccionada: selectedIndex }) });
     state.answers[state.index] = selectedIndex;
     if (data.finished) { renderResults(data); localStorage.removeItem(STORAGE_KEY); state.question = null; showScreen('result'); return; }
-    state.index = data.index; state.question = data.question; state.remainingSeconds = data.remainingSeconds; state.finalizing = false; saveState(); renderQuestion();
-  } catch (error) { state.finalizing = false; $('#registration-error').textContent = error.message; startTimer(Math.max(1, state.secondsLeft)); }
+    state.index = data.index; state.question = data.question; state.remainingSeconds = data.remainingSeconds; saveState(); renderQuestion();
+  } catch (error) {
+    $('#registration-error').textContent = error.message; startTimer(Math.max(1, state.secondsLeft));
+  } finally {
+    state.finalizing = false;
+    setButtonLoading(submitBtn, false);
+  }
 }
 
 function renderResults(data) {
