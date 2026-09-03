@@ -123,4 +123,11 @@ $('#answer-form').addEventListener('submit', (event) => { event.preventDefault()
 document.addEventListener('contextmenu', (event) => event.preventDefault());
 document.addEventListener('keydown', (event) => { if (event.key === 'F12' || (event.ctrlKey && event.shiftKey && ['I', 'J', 'C'].includes(event.key.toUpperCase()))) event.preventDefault(); });
 setInterval(detectDevTools, 1000);
+
+// Precalentar el Apps Script para mitigar el Cold Start apenas cargue el DOM
+window.addEventListener('DOMContentLoaded', () => {
+  fetch(`${ENDPOINT_URL}?action=ping`, { mode: 'no-cors', cache: 'no-store' })
+    .catch(() => {/* Ignorar errores de precalentamiento */});
+});
+
 restoreSession().catch((error) => { localStorage.removeItem(STORAGE_KEY); console.error('No se pudo restaurar la sesión:', error); });
